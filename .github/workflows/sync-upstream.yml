@@ -1,0 +1,34 @@
+name: 同步上游 CherryUSB
+
+on:
+  schedule:
+    - cron: "17 3 * * *"      # 每天 UTC 03:17 自动检查
+  workflow_dispatch:           # 支持手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  sync-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      # 本工作流文件只放在默认分支 sync 上，master 保持纯镜像（零本地提交），
+      # 因此这里固定 checkout master，且 master 永远可以快进合并
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: 快进同步上游 master 并推送
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/cherry-embedded/CherryUSB.git
+          git fetch upstream master --tags
+          # master 是纯镜像，没有本地提交，所以永远可以快进：
+          # 快进只增不删历史，符合保护性 fork 的约束；
+          # 上游若重写历史导致分叉，--ff-only 会失败，转人工处理
+          git merge --ff-only upstream/master
+          git push origin master
+          git push origin --tags   # 镜像 tag；上游移动/重打 tag 会 non-fast-forward 失败，转人工，不强制覆盖
