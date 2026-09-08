@@ -6,13 +6,6 @@
 #include "usbd_core.h"
 #include "usbd_audio.h"
 
-struct audio_entity_param {
-    uint32_t wCur;
-    uint32_t wMin;
-    uint32_t wMax;
-    uint32_t wRes;
-};
-
 struct usbd_audio_priv {
     struct audio_entity_info *table;
     uint8_t num;
@@ -66,7 +59,7 @@ static int audio_class_interface_request_handler(uint8_t busid, struct usb_setup
     uint8_t control_selector;
     uint8_t ch;
     uint8_t mute;
-    uint16_t volume;
+    int16_t volume;
     int volume_db = 0;
     uint32_t sampling_freq = 0;
 
@@ -131,21 +124,13 @@ static int audio_class_interface_request_handler(uint8_t busid, struct usb_setup
                         switch (setup->bRequest) {
                             case AUDIO_REQUEST_SET_CUR:
                                 memcpy(&volume, *data, 2);
-                                if (volume < 0x8000) {
-                                    volume_db = volume / 256;
-                                } else {
-                                    volume_db = (volume - 0x10000) / 256;
-                                }
+                                volume_db = volume / 256;
                                 USB_LOG_DBG("Set ep:0x%02x ch:%d vol_hex:0x%04x, vol_db:%d dB\r\n", ep, ch, volume, volume_db);
                                 usbd_audio_set_volume(busid, ep, ch, volume_db);
                                 break;
                             case AUDIO_REQUEST_GET_CUR:
                                 volume_db = usbd_audio_get_volume(busid, ep, ch);
-                                if (volume_db >= 0) {
-                                    volume = volume_db * 256;
-                                } else {
-                                    volume = volume_db * 256 + 0x10000;
-                                }
+                                volume = volume_db * 256;
                                 USB_LOG_DBG("Get ep:0x%02x ch:%d vol_hex:0x%04x, vol_db:%d dB\r\n", ep, ch, volume, volume_db);
                                 memcpy(*data, &volume, 2);
                                 *len = 2;
@@ -173,21 +158,13 @@ static int audio_class_interface_request_handler(uint8_t busid, struct usb_setup
                             case AUDIO_REQUEST_CUR:
                                 if (setup->bmRequestType & USB_REQUEST_DIR_MASK) {
                                     volume_db = usbd_audio_get_volume(busid, ep, ch);
-                                    if (volume_db >= 0) {
-                                        volume = volume_db * 256;
-                                    } else {
-                                        volume = volume_db * 256 + 0x10000;
-                                    }
+                                    volume = volume_db * 256;
                                     USB_LOG_DBG("Get ep:0x%02x ch:%d vol_hex:0x%04x, vol_db:%d dB\r\n", ep, ch, volume, volume_db);
                                     memcpy(*data, &volume, 2);
                                     *len = 2;
                                 } else {
                                     memcpy(&volume, *data, 2);
-                                    if (volume < 0x8000) {
-                                        volume_db = volume / 256;
-                                    } else {
-                                        volume_db = (volume - 0x10000) / 256;
-                                    }
+                                    volume_db = volume / 256;
                                     USB_LOG_DBG("Set ep:0x%02x ch:%d vol_hex:0x%04x, vol_db:%d dB\r\n", ep, ch, volume, volume_db);
                                     usbd_audio_set_volume(busid, ep, ch, volume_db);
                                 }
