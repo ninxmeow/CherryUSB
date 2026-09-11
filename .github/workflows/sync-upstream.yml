@@ -8,27 +8,62 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: sync-upstream-master
+  cancel-in-progress: false
+
 jobs:
+  verify-sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout workflow and regression tests
+        uses: actions/checkout@v4
+      - name: 验证历史保留与子模块恢复
+        run: |
+          python3 -m pip install PyYAML==6.0.3
+          python3 -B -m unittest discover -s .github/tests -v
+
   sync-upstream:
+    needs: verify-sync
     runs-on: ubuntu-latest
     steps:
-      # 本工作流文件只放在默认分支 sync 上，master 保持纯镜像（零本地提交），
-      # 因此这里固定 checkout master，且 master 永远可以快进合并
+      # 工作流放在默认分支 sync 上；master 为依赖备份入口，只追加历史。
+      # 同步后的文件内容与上游一致，master 上所有已发布提交必须仍是其祖先。
       - name: Checkout fork
         uses: actions/checkout@v4
         with:
           ref: master
           fetch-depth: 0
 
-      - name: 快进同步上游 master 并推送
+      - name: 同步上游 master 并推送
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/cherry-embedded/CherryUSB.git
-          git fetch upstream master --tags
-          # master 是纯镜像，没有本地提交，所以永远可以快进：
-          # 快进只增不删历史，符合保护性 fork 的约束；
-          # 上游若重写历史导致分叉，--ff-only 会失败，转人工处理
-          git merge --ff-only upstream/master
-          git push origin master
-          git push origin --tags   # 镜像 tag；上游移动/重打 tag 会 non-fast-forward 失败，转人工，不强制覆盖
+          git fetch upstream refs/heads/master:refs/remotes/upstream/master --tags
+          current_master="$(git rev-parse HEAD)"
+          upstream_master="$(git rev-parse refs/remotes/upstream/master)"
+          upstream_tree="$(git rev-parse "$upstream_master^{tree}")"
+          if git merge-base --is-ancestor "$current_master" "$upstream_master"; then
+            next_master="$upstream_master"
+          elif git merge-base --is-ancestor "$upstream_master" "$current_master" &&
+               [ "$(git rev-parse "$current_master^{tree}")" = "$upstream_tree" ]; then
+            # 上次同步已保留上游提交且文件内容相同，不重复创建合并提交。
+            next_master="$current_master"
+          else
+            # 分叉、回退或无共同祖先时，保留两条历史，文件树直接采用上游版本。
+            # 旧 master 是第一父提交，已被 userProg 固定的 SHA 始终可从 master 获取。
+            next_master="$(git commit-tree "$upstream_tree" \
+              -p "$current_master" -p "$upstream_master" \
+              -m "Sync upstream master $upstream_master; preserve fork history")"
+          fi
+          # 发布前验证历史保留与文件树一致；仅普通推送，禁止重写或删除远端引用。
+          git merge-base --is-ancestor "$current_master" "$next_master"
+          git diff --quiet "$next_master^{tree}" "$upstream_tree"
+          # master 与 tag 原子更新；并发冲突、tag 改写或权限失败时整次推送中止。
+          # 不删除上游已移除的 tag，也不覆盖旧 tag。
+          git push --atomic origin "$next_master:refs/heads/master" 'refs/tags/*:refs/tags/*'
