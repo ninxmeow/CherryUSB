@@ -137,12 +137,6 @@ static inline void ehci_qh_add_head(struct ehci_qh_hw *head, struct ehci_qh_hw *
     n->hw.hlp = head->hw.hlp;
     usb_ehci_qh_qtd_flush(n);
 
-    if (n->urb->setup) {
-        usb_dcache_clean((uintptr_t)n->urb->setup, USB_ALIGN_UP(8, CONFIG_USB_ALIGN_SIZE));
-    }
-
-    usb_dcache_flush((uintptr_t)n->urb->transfer_buffer, USB_ALIGN_UP(n->urb->transfer_buffer_length, CONFIG_USB_ALIGN_SIZE));
-
     head->hw.hlp = QH_HLP_QH(n);
 #if defined(CONFIG_USB_EHCI_DESC_DCACHE_ENABLE)
     usb_dcache_clean((uintptr_t)&head->hw, CONFIG_USB_EHCI_ALIGN_SIZE);
@@ -158,6 +152,9 @@ static inline void ehci_qh_remove(struct ehci_qh_hw *head, struct ehci_qh_hw *n)
     }
 
     if (tmp) {
+#if defined(CONFIG_USB_EHCI_DESC_DCACHE_ENABLE)
+        usb_dcache_invalidate((uintptr_t)&n->hw, CONFIG_USB_EHCI_ALIGN_SIZE);
+#endif
         tmp->hw.hlp = n->hw.hlp;
 #if defined(CONFIG_USB_EHCI_DESC_DCACHE_ENABLE)
         usb_dcache_clean((uintptr_t)&tmp->hw, CONFIG_USB_EHCI_ALIGN_SIZE);
@@ -626,6 +623,23 @@ static void ehci_urb_waitup(struct usbh_bus *bus, struct usbh_urb *urb)
     qh = (struct ehci_qh_hw *)urb->hcpriv;
 
     qh->remove_in_iaad = 0;
+
+#ifdef CONFIG_USB_DCACHE_ENABLE
+    if (urb->transfer_buffer && (urb->ep->bEndpointAddress & 0x80) && urb->errorcode == 0) {
+        switch (USB_GET_ENDPOINT_TYPE(urb->ep->bmAttributes)) {
+            case USB_ENDPOINT_TYPE_CONTROL:
+                usb_dcache_invalidate((uintptr_t)urb->transfer_buffer, USB_ALIGN_UP(urb->actual_length - 8, CONFIG_USB_ALIGN_SIZE));
+                break;
+            case USB_ENDPOINT_TYPE_BULK:
+            case USB_ENDPOINT_TYPE_INTERRUPT:
+                usb_dcache_invalidate((uintptr_t)urb->transfer_buffer, USB_ALIGN_UP(urb->actual_length, CONFIG_USB_ALIGN_SIZE));
+                break;
+
+            default:
+                break;
+        }
+    }
+#endif
 
     if (urb->timeout) {
         usb_osal_sem_give(qh->waitsem);
@@ -1246,6 +1260,18 @@ int usbh_submit_urb(struct usbh_urb *urb)
 
     usb_osal_leave_critical_section(flags);
 
+    if (urb->setup) {
+        usb_dcache_clean((uintptr_t)urb->setup, USB_ALIGN_UP(sizeof(struct usb_setup_packet), CONFIG_USB_ALIGN_SIZE));
+    }
+
+    if (urb->transfer_buffer) {
+        if ((urb->setup && urb->setup->bmRequestType & 0x80) || (urb->ep->bEndpointAddress & 0x80)) {
+            usb_dcache_invalidate((uintptr_t)urb->transfer_buffer, USB_ALIGN_UP(urb->transfer_buffer_length, CONFIG_USB_ALIGN_SIZE));
+        } else {
+            usb_dcache_clean((uintptr_t)urb->transfer_buffer, USB_ALIGN_UP(urb->transfer_buffer_length, CONFIG_USB_ALIGN_SIZE));
+        }
+    }
+
     switch (USB_GET_ENDPOINT_TYPE(urb->ep->bmAttributes)) {
         case USB_ENDPOINT_TYPE_CONTROL:
             qh = ehci_control_urb_init(bus, urb, urb->setup, urb->transfer_buffer, urb->transfer_buffer_length);
@@ -1316,6 +1342,9 @@ int usbh_kill_urb(struct usbh_urb *urb)
     EHCI_HCOR->usbcmd &= ~(EHCI_USBCMD_PSEN | EHCI_USBCMD_ASEN);
 
     if ((USB_GET_ENDPOINT_TYPE(urb->ep->bmAttributes) == USB_ENDPOINT_TYPE_CONTROL) || (USB_GET_ENDPOINT_TYPE(urb->ep->bmAttributes) == USB_ENDPOINT_TYPE_BULK)) {
+#if defined(CONFIG_USB_EHCI_DESC_DCACHE_ENABLE)
+        usb_dcache_invalidate((uintptr_t)&g_async_qh_head[bus->hcd.hcd_id].hw, CONFIG_USB_EHCI_ALIGN_SIZE);
+#endif
         qh = EHCI_ADDR2QH(g_async_qh_head[bus->hcd.hcd_id].hw.hlp);
         while ((qh != &g_async_qh_head[bus->hcd.hcd_id]) && qh) {
             if (qh->urb == urb) {
@@ -1325,6 +1354,9 @@ int usbh_kill_urb(struct usbh_urb *urb)
             qh = EHCI_ADDR2QH(qh->hw.hlp);
         }
     } else if (USB_GET_ENDPOINT_TYPE(urb->ep->bmAttributes) == USB_ENDPOINT_TYPE_INTERRUPT) {
+#if defined(CONFIG_USB_EHCI_DESC_DCACHE_ENABLE)
+        usb_dcache_invalidate((uintptr_t)&g_periodic_qh_head[bus->hcd.hcd_id].hw, CONFIG_USB_EHCI_ALIGN_SIZE);
+#endif
         qh = EHCI_ADDR2QH(g_periodic_qh_head[bus->hcd.hcd_id].hw.hlp);
         while (qh) {
             if (qh->urb == urb) {
@@ -1381,6 +1413,9 @@ static void ehci_scan_async_list(struct usbh_bus *bus)
 {
     struct ehci_qh_hw *qh;
 
+#if defined(CONFIG_USB_EHCI_DESC_DCACHE_ENABLE)
+    usb_dcache_invalidate((uintptr_t)&g_async_qh_head[bus->hcd.hcd_id].hw, CONFIG_USB_EHCI_ALIGN_SIZE);
+#endif
     qh = EHCI_ADDR2QH(g_async_qh_head[bus->hcd.hcd_id].hw.hlp);
     while ((qh != &g_async_qh_head[bus->hcd.hcd_id]) && qh) {
         if (qh->urb) {
@@ -1394,6 +1429,9 @@ static void ehci_scan_periodic_list(struct usbh_bus *bus)
 {
     struct ehci_qh_hw *qh;
 
+#if defined(CONFIG_USB_EHCI_DESC_DCACHE_ENABLE)
+    usb_dcache_invalidate((uintptr_t)&g_periodic_qh_head[bus->hcd.hcd_id].hw, CONFIG_USB_EHCI_ALIGN_SIZE);
+#endif
     qh = EHCI_ADDR2QH(g_periodic_qh_head[bus->hcd.hcd_id].hw.hlp);
     while (qh) {
         if (qh->urb) {

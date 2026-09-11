@@ -182,7 +182,7 @@ USB_NOCACHE_RAM_SECTION USB_MEM_ALIGNX uint8_t s_speaker_feedback_buffer[4];
 
 volatile bool rx_flag = 0;
 volatile uint32_t s_speaker_sample_rate;
-volatile uint8_t s_speaker_volume_db;
+volatile float s_speaker_volume_db;
 
 static void usbd_event_handler(uint8_t busid, uint8_t event)
 {
@@ -260,14 +260,14 @@ void usbd_audio_get_sampling_freq_table(uint8_t busid, uint8_t ep, uint8_t **sam
     }
 }
 
-void usbd_audio_set_volume(uint8_t busid, uint8_t ep, uint8_t ch, int volume_db)
+void usbd_audio_set_volume(uint8_t busid, uint8_t ep, uint8_t ch, float volume_db)
 {
     if (ep == AUDIO_OUT_EP) {
         s_speaker_volume_db = volume_db;
     }
 }
 
-int usbd_audio_get_volume(uint8_t busid, uint8_t ep, uint8_t ch)
+float usbd_audio_get_volume(uint8_t busid, uint8_t ep, uint8_t ch)
 {
     if (ep == AUDIO_OUT_EP) {
         return s_speaker_volume_db;
