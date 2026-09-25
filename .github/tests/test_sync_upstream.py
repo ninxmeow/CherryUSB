@@ -72,12 +72,30 @@ class SyncUpstreamTests(unittest.TestCase):
         return self.execute(["git", "-C", str(repo), *arguments], self.root).stdout.strip()
 
     def commit(self, content, parent=None):
+        return self.commit_files({"state.txt": content}, parent=parent, message=content)
+
+    def commit_files(self, files, parent=None, message="commit"):
         if parent is not None:
             self.git(self.seed, "checkout", "--detach", parent)
-        (self.seed / "state.txt").write_text(content, encoding="utf-8")
-        self.git(self.seed, "add", "state.txt")
-        self.git(self.seed, "commit", "-m", content)
+        for name, content in files.items():
+            path = self.seed / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        self.git(self.seed, "add", "--all")
+        self.git(self.seed, "commit", "-m", message)
         return self.git(self.seed, "rev-parse", "HEAD")
+
+    def assert_source_tree(self, actual, expected):
+        result = self.execute(
+            [
+                "git", "-C", str(self.origin), "diff", "--quiet",
+                f"{actual}^{{tree}}", f"{expected}^{{tree}}", "--", ".",
+                ":(exclude).github/workflows",
+            ],
+            self.root,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def publish(self, remote, commit, ref="refs/heads/master", force=False):
         # Force is used only to model a rewrite by the upstream in this fixture.
@@ -122,7 +140,9 @@ class SyncUpstreamTests(unittest.TestCase):
         self.publish(self.upstream, new, "refs/tags/v-next")
         self.assertEqual(self.sync(), new)
         self.assertEqual(self.sync(), new)
-        self.assertEqual(self.git(self.origin, "rev-parse", "refs/tags/v-next"), new)
+        tag_commit = self.git(self.origin, "rev-parse", "refs/tags/v-next^{commit}")
+        self.assert_source_tree(tag_commit, new)
+        self.assertNotEqual(tag_commit, new)
         self.assert_preserved(self.base, new)
 
     def test_conflicting_rewrite_preserves_history_on_master(self):
@@ -165,7 +185,43 @@ class SyncUpstreamTests(unittest.TestCase):
         self.git(self.seed, "commit", "--allow-empty", "-m", "upstream metadata only")
         new = self.git(self.seed, "rev-parse", "HEAD")
         self.publish(self.upstream, new)
-        self.assertEqual(self.sync(), new)
+        synced = self.sync()
+        self.assertEqual(synced, new)
+        self.assert_preserved(new, synced)
+        self.assert_upstream_tree(synced, new)
+
+    def test_upstream_workflows_are_not_imported(self):
+        fork = self.commit_files(
+            {".github/workflows/build.yml": "fork workflow\n"},
+            parent=self.base,
+            message="fork workflow",
+        )
+        self.publish(self.origin, fork)
+        upstream = self.commit_files(
+            {
+                "state.txt": "upstream source\n",
+                ".github/workflows/build.yml": "upstream workflow\n",
+            },
+            parent=self.base,
+            message="upstream workflow",
+        )
+        self.publish(self.upstream, upstream)
+
+        synced = self.sync()
+        self.assert_source_tree(synced, upstream)
+        self.assert_preserved(fork, synced)
+        self.assert_preserved(upstream, synced)
+        self.assertEqual(
+            self.git(self.origin, "show", f"{synced}:.github/workflows/build.yml"),
+            "fork workflow",
+        )
+
+    def test_tag_outside_upstream_master_is_not_published(self):
+        side = self.commit("side branch", parent=self.base)
+        self.publish(self.upstream, side, "refs/heads/release-only")
+        self.publish(self.upstream, side, "refs/tags/v-side")
+        self.sync()
+        self.assertEqual(self.git(self.origin, "tag", "--list", "v-side"), "")
 
     def test_missing_upstream_master_leaves_fork_untouched(self):
         self.git(self.upstream, "update-ref", "-d", "refs/heads/master")

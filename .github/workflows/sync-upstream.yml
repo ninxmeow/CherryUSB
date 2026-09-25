@@ -30,40 +30,127 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # 工作流放在默认分支 sync 上；master 为依赖备份入口，只追加历史。
-      # 同步后的文件内容与上游一致，master 上所有已发布提交必须仍是其祖先。
+      # 仅同步上游 master 的非 workflow 内容；master 上的 workflow 由 fork 自己维护。
       - name: Checkout fork
         uses: actions/checkout@v4
         with:
           ref: master
           fetch-depth: 0
 
-      - name: 同步上游 master 并推送
+      - name: 同步上游 master、重建 tags 并推送
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream https://github.com/cherry-embedded/CherryUSB.git
-          git fetch upstream refs/heads/master:refs/remotes/upstream/master --tags
+          git fetch --no-tags upstream \
+            refs/heads/master:refs/remotes/upstream/master \
+            'refs/tags/*:refs/remotes/upstream/tags/*'
+
           current_master="$(git rev-parse HEAD)"
           upstream_master="$(git rev-parse refs/remotes/upstream/master)"
+          snapshot_root="$(mktemp -d)"
+          tree_counter=0
+          cleanup() {
+            rm -rf "$snapshot_root"
+          }
+          trap cleanup EXIT
+
+          # 生成源码快照树。keep_workflows=yes 时仅保留 fork 当前 master 的 workflow。
+          make_tree() {
+            local source_commit="$1"
+            local keep_workflows="$2"
+            local tree_dir="$snapshot_root/tree-$tree_counter"
+            local index_file="$snapshot_root/index-$tree_counter"
+            local workflow_entries
+            local tree
+            tree_counter=$((tree_counter + 1))
+
+            mkdir -p "$tree_dir"
+            git archive "$source_commit" | tar -x -C "$tree_dir"
+            rm -rf "$tree_dir/.github/workflows"
+            if [ "$keep_workflows" = yes ]; then
+              workflow_entries="$(git ls-tree -r --name-only "$current_master" .github/workflows)"
+              if [ -n "$workflow_entries" ]; then
+                mkdir -p "$tree_dir/.github"
+                git archive "$current_master" .github/workflows | tar -x -C "$tree_dir"
+              fi
+            fi
+
+            rm -f "$index_file"
+            GIT_INDEX_FILE="$index_file" git read-tree --empty
+            GIT_INDEX_FILE="$index_file" \
+              git --work-tree="$tree_dir" add --all -- .
+            tree="$(GIT_INDEX_FILE="$index_file" git write-tree)"
+            printf '%s\n' "$tree"
+          }
+
+          # master 使用上游源码，但不导入上游 workflow；fork 当前 workflow 原样保留。
+          filtered_tree="$(make_tree "$upstream_master" yes)"
           upstream_tree="$(git rev-parse "$upstream_master^{tree}")"
-          if git merge-base --is-ancestor "$current_master" "$upstream_master"; then
+          current_tree="$(git rev-parse "$current_master^{tree}")"
+
+          if git merge-base --is-ancestor "$current_master" "$upstream_master" &&
+             [ "$filtered_tree" = "$upstream_tree" ]; then
+            # 上游新增内容未改变 workflow，直接快进到上游提交。
             next_master="$upstream_master"
           elif git merge-base --is-ancestor "$upstream_master" "$current_master" &&
-               [ "$(git rev-parse "$current_master^{tree}")" = "$upstream_tree" ]; then
-            # 上次同步已保留上游提交且文件内容相同，不重复创建合并提交。
+               [ "$current_tree" = "$filtered_tree" ]; then
+            # 上游提交已在 master 历史中，且过滤后的内容没有变化。
             next_master="$current_master"
           else
-            # 分叉、回退或无共同祖先时，保留两条历史，文件树直接采用上游版本。
-            # 旧 master 是第一父提交，已被 userProg 固定的 SHA 始终可从 master 获取。
-            next_master="$(git commit-tree "$upstream_tree" \
+            # 保留 fork master 为第一父、上游 master 为第二父；文件树采用过滤后的版本。
+            next_master="$(git commit-tree "$filtered_tree" \
               -p "$current_master" -p "$upstream_master" \
               -m "Sync upstream master $upstream_master; preserve fork history")"
           fi
-          # 发布前验证历史保留与文件树一致；仅普通推送，禁止重写或删除远端引用。
+
           git merge-base --is-ancestor "$current_master" "$next_master"
-          git diff --quiet "$next_master^{tree}" "$upstream_tree"
-          # master 与 tag 原子更新；并发冲突、tag 改写或权限失败时整次推送中止。
-          # 不删除上游已移除的 tag，也不覆盖旧 tag。
-          git push --atomic origin "$next_master:refs/heads/master" 'refs/tags/*:refs/tags/*'
+          git merge-base --is-ancestor "$upstream_master" "$next_master"
+          git diff --quiet "$next_master^{tree}" "$filtered_tree"
+
+          # 上游 tags 只重建属于上游 master 历史的新 tags。
+          # tag 对象、作者、时间和签名不要求与上游一致；只比较排除 workflow 后的源码内容。
+          tag_pushes=()
+          while IFS= read -r tag; do
+            upstream_tag="refs/remotes/upstream/tags/$tag"
+            local_tag="refs/tags/$tag"
+            if ! source_commit="$(git rev-parse "$upstream_tag^{commit}" 2>/dev/null)"; then
+              echo "skip non-commit upstream tag: $tag"
+              continue
+            fi
+            if ! git merge-base --is-ancestor "$source_commit" "$upstream_master"; then
+              echo "skip tag outside upstream/master: $tag"
+              continue
+            fi
+
+            source_tree="$(make_tree "$source_commit" no)"
+            if git show-ref --verify --quiet "$local_tag"; then
+              local_commit="$(git rev-parse "$local_tag^{commit}")"
+              local_tree="$(make_tree "$local_commit" no)"
+              if [ "$source_tree" != "$local_tree" ]; then
+                echo "tag content conflict: $tag" >&2
+                exit 1
+              fi
+              echo "keep existing tag: $tag"
+              continue
+            fi
+
+            tag_commit="$(git commit-tree "$source_tree" \
+              -m "Recreated from upstream tag $tag")"
+            git update-ref "$local_tag" "$tag_commit"
+            tag_pushes+=("$local_tag:$local_tag")
+            echo "recreate tag: $tag"
+          done < <(
+            git for-each-ref \
+              --format='%(refname:strip=4)' \
+              refs/remotes/upstream/tags
+          )
+
+          # 只推送 master 和新增 tags；不删除 fork 现有 refs，不覆盖已有 tags。
+          push_args=("$next_master:refs/heads/master")
+          if ((${#tag_pushes[@]} > 0)); then
+            push_args+=("${tag_pushes[@]}")
+          fi
+          git push --atomic origin "${push_args[@]}"
