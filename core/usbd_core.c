@@ -1383,6 +1383,11 @@ void usbd_add_endpoint(uint8_t busid, struct usbd_endpoint *ep)
     }
 }
 
+uint8_t usbd_get_device_speed(uint8_t busid)
+{
+    return g_usbd_core[busid].speed;
+}
+
 uint16_t usbd_get_ep_mps(uint8_t busid, uint8_t ep)
 {
     if (ep & 0x80) {
@@ -1520,14 +1525,13 @@ int usbd_initialize(uint8_t busid, uintptr_t reg_base, void (*event_handler)(uin
         usb_osal_mq_delete(g_usbd_core[busid].usbd_ep0_mq);
         return -USB_ERR_NOMEM;
     }
-}
 #endif
 
-g_usbd_core[busid].event_handler = event_handler;
-usbd_class_event_notify_handler(busid, USBD_EVENT_INIT, NULL);
-g_usbd_core[busid].event_handler(busid, USBD_EVENT_INIT);
-ret = usb_dc_init(busid);
-return ret;
+    g_usbd_core[busid].event_handler = event_handler;
+    usbd_class_event_notify_handler(busid, USBD_EVENT_INIT, NULL);
+    g_usbd_core[busid].event_handler(busid, USBD_EVENT_INIT);
+    ret = usb_dc_init(busid);
+    return ret;
 }
 
 int usbd_deinitialize(uint8_t busid)

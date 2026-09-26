@@ -135,7 +135,6 @@ static struct usbhs_pipe *usbhs_pipe_alloc(struct usbh_bus *bus, struct usbh_urb
                 g_usbhs_hcd[bus->hcd.hcd_id].pipe_pool[chidx].interval = 0;
             }
 
-            usb_osal_sem_reset(g_usbhs_hcd[bus->hcd.hcd_id].pipe_pool[chidx].waitsem);
             memset(&g_usbhs_hcd[bus->hcd.hcd_id].pipe_pool[chidx].xfer, 0, sizeof(usbhs_xfer_t));
             g_usbhs_hcd[bus->hcd.hcd_id].pipe_pool[chidx].urb = urb;
             if (g_usbhs_hcd[bus->hcd.hcd_id].pipe_list[type] == NULL) {
@@ -161,6 +160,8 @@ static void usbhs_pipe_free(struct usbh_bus *bus, struct usbhs_pipe *pipe, uint8
 {
     usbhs_xfer_t *xfer = &pipe->xfer;
 
+    size_t flags = usb_osal_enter_critical_section();
+
     if (xfer->xfer_state != XFER_STATE_BUSY) {
         if (pipe->prev) {
             pipe->prev->next = pipe->next;
@@ -176,6 +177,7 @@ static void usbhs_pipe_free(struct usbh_bus *bus, struct usbhs_pipe *pipe, uint8
     } else {
         pipe->killed = true;
     }
+    usb_osal_leave_critical_section(flags);
 }
 
 static usbhs_xfer_t **usbhs_xfer_process(struct usbh_bus *bus, usbhs_xfer_t **last_xfer, uint8_t type)
@@ -738,8 +740,13 @@ int usbh_kill_urb(struct usbh_urb *urb)
     size_t flags = usb_osal_enter_critical_section();
 
     struct usbhs_pipe *pipe = urb->hcpriv;
+    if (!pipe) {
+        usb_osal_leave_critical_section(flags);
+        return -USB_ERR_INVAL;
+    }
 
     urb->errorcode = -USB_ERR_SHUTDOWN;
+    usb_osal_leave_critical_section(flags);
 
     if (urb->timeout) {
         usb_osal_sem_give(pipe->waitsem);
@@ -751,7 +758,6 @@ int usbh_kill_urb(struct usbh_urb *urb)
         urb->complete(urb->arg, urb->errorcode);
     }
 
-    usb_osal_leave_critical_section(flags);
     return 0;
 }
 
