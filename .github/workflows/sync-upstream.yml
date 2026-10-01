@@ -14,12 +14,12 @@ concurrency:
 
 jobs:
   verify-sync:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Checkout workflow and regression tests
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: 验证历史保留与子模块恢复
         run: |
           python3 -m pip install PyYAML==6.0.3
@@ -27,12 +27,12 @@ jobs:
 
   sync-upstream:
     needs: verify-sync
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # 工作流放在默认分支 sync 上；master 为依赖备份入口，只追加历史。
       # 仅同步上游 master 的非 workflow 内容；master 上的 workflow 由 fork 自己维护。
       - name: Checkout fork
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: master
           fetch-depth: 0
