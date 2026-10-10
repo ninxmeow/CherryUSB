@@ -9,6 +9,11 @@
 #include "usbd_core.h"
 #include "usbd_adb.h"
 
+#ifdef RT_USING_FINSH
+#include <shell.h>
+#include <finsh.h>
+#endif
+
 #ifndef CONFIG_USBDEV_SHELL_RX_BUFSIZE
 #define CONFIG_USBDEV_SHELL_RX_BUFSIZE (2048)
 #endif
@@ -102,6 +107,8 @@ void rt_usbd_adb_shell_init(void)
 static void adb_shell_on_open(uint32_t remoteid)
 {
     USB_LOG_INFO("adb shell open, remoteid:%u\r\n", (unsigned)remoteid);
+    finsh_set_device("adb-sh");
+    rt_console_set_device("adb-sh");
 }
 
 static void adb_shell_on_close(uint32_t remoteid)
@@ -111,7 +118,12 @@ static void adb_shell_on_close(uint32_t remoteid)
 
 static void adb_shell_on_write(uint32_t remoteid, const uint8_t *data, uint32_t len)
 {
-    rt_ringbuffer_put(&g_usbd_adb_shell.rx_rb, data, len);
+    rt_size_t put;
+
+    put = rt_ringbuffer_put(&g_usbd_adb_shell.rx_rb, data, len);
+    if (g_usbd_adb_shell.parent.rx_indicate != RT_NULL) {
+        g_usbd_adb_shell.parent.rx_indicate(&g_usbd_adb_shell.parent, put);
+    }
 }
 
 static const struct adb_service adb_shell_service = {
@@ -130,27 +142,17 @@ void usbd_adb_shell_init(void)
     rt_usbd_adb_shell_init();
 }
 
-static int adb_enter(int argc, char **argv)
-{
-    (void)argc;
-    (void)argv;
-
-    finsh_set_device("adb-sh");
-    rt_console_set_device("adb-sh");
-
-    return 0;
-}
-MSH_CMD_EXPORT(adb_enter, adb_enter);
-
 static int adb_exit(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
 
-    usbd_adb_close(ADB_SHELL_LOALID);
+    usbd_adb_close(ADB_LOCALID_SHELL);
 
-    finsh_set_device(RT_CONSOLE_DEVICE_NAME);
-    rt_console_set_device(RT_CONSOLE_DEVICE_NAME);
+    if (rt_console_get_device() != rt_device_find(RT_CONSOLE_DEVICE_NAME)) {
+        rt_console_set_device(RT_CONSOLE_DEVICE_NAME);
+        finsh_set_device(RT_CONSOLE_DEVICE_NAME);
+    }
 
     return 0;
 }
