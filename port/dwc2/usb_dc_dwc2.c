@@ -71,7 +71,8 @@ static inline int dwc2_reset(uint8_t busid)
             }
         } while ((USB_OTG_GLB->GRSTCTL & USB_OTG_GRSTCTL_CSRSTDONE) != USB_OTG_GRSTCTL_CSRSTDONE);
 
-        USB_OTG_GLB->GRSTCTL &= ~(USB_OTG_GRSTCTL_CSRST | USB_OTG_GRSTCTL_CSRSTDONE);
+        USB_OTG_GLB->GRSTCTL &= ~USB_OTG_GRSTCTL_CSRST;
+        USB_OTG_GLB->GRSTCTL |= USB_OTG_GRSTCTL_CSRSTDONE;
     }
 
     return 0;
