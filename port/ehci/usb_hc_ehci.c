@@ -634,16 +634,17 @@ static void ehci_urb_waitup(struct usbh_bus *bus, struct usbh_urb *urb)
 
     qh = (struct ehci_qh_hw *)urb->hcpriv;
 
+    qh->remove_in_iaad = 0;
+
     if (qh->killed == 1U) {
         qh->killed = 2U;
         return;
     }
 
-    qh->remove_in_iaad = 0;
-    qh->killed = 0;
-
 #ifdef CONFIG_USB_DCACHE_ENABLE
-    if (urb->transfer_buffer && (urb->ep->bEndpointAddress & 0x80) && urb->errorcode == 0) {
+    if (urb->transfer_buffer &&
+        ((urb->setup && urb->setup->bmRequestType & 0x80) || (urb->ep->bEndpointAddress & 0x80)) &&
+        urb->errorcode == 0) {
         switch (USB_GET_ENDPOINT_TYPE(urb->ep->bmAttributes)) {
             case USB_ENDPOINT_TYPE_CONTROL:
                 usb_dcache_invalidate((uintptr_t)urb->transfer_buffer, USB_ALIGN_UP(urb->actual_length - 8, CONFIG_USB_ALIGN_SIZE));
@@ -1391,10 +1392,10 @@ int usbh_kill_urb(struct usbh_urb *urb)
     EHCI_HCOR->usbcmd |= (EHCI_USBCMD_PSEN | EHCI_USBCMD_ASEN);
 
     qh = (struct ehci_qh_hw *)urb->hcpriv;
-    qh->killed = 1U;
     urb->errorcode = -USB_ERR_SHUTDOWN;
 
     if (remove_in_iaad) {
+        qh->killed = 1U; /* trigger iaad isr and wait isr done */
         qh->remove_in_iaad = 1;
         EHCI_HCOR->usbcmd |= EHCI_USBCMD_IAAD;
         usb_osal_leave_critical_section(flags);
@@ -1408,6 +1409,7 @@ int usbh_kill_urb(struct usbh_urb *urb)
                 return -USB_ERR_TIMEOUT;
             }
         }
+        qh->killed = 0;
     } else {
         usb_osal_leave_critical_section(flags);
     }
