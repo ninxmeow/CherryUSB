@@ -37,21 +37,20 @@ static struct usbh_cdc_ncm g_cdc_ncm_class;
 
 static int usbh_cdc_ncm_get_ntb_parameters(struct usbh_cdc_ncm *cdc_ncm_class, struct cdc_ncm_ntb_parameters *param)
 {
-    struct usb_setup_packet *setup;
+    struct usb_setup_packet setup;
     int ret;
 
     if (!cdc_ncm_class || !cdc_ncm_class->hport) {
         return -USB_ERR_INVAL;
     }
-    setup = cdc_ncm_class->hport->setup;
 
-    setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_INTERFACE;
-    setup->bRequest = CDC_REQUEST_GET_NTB_PARAMETERS;
-    setup->wValue = 0;
-    setup->wIndex = cdc_ncm_class->ctrl_intf;
-    setup->wLength = 28;
+    setup.bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_INTERFACE;
+    setup.bRequest = CDC_REQUEST_GET_NTB_PARAMETERS;
+    setup.wValue = 0;
+    setup.wIndex = cdc_ncm_class->ctrl_intf;
+    setup.wLength = 28;
 
-    ret = usbh_control_transfer(cdc_ncm_class->hport, setup, g_cdc_ncm_buf);
+    ret = usbh_control_transfer(cdc_ncm_class->hport, &setup, g_cdc_ncm_buf);
     if (ret < sizeof(struct cdc_ncm_ntb_parameters)) {
         return ret;
     }
@@ -120,8 +119,8 @@ static int usbh_cdc_ncm_connect(struct usbh_hubport *hport, uint8_t intf)
     cdc_ncm_class->ctrl_intf = intf;
     cdc_ncm_class->data_intf = intf + 1;
 
-    hport->config.intf[intf].priv = cdc_ncm_class;
-    hport->config.intf[intf + 1].priv = NULL;
+    usbh_set_intf_data(hport, intf, cdc_ncm_class);
+    usbh_set_intf_data(hport, intf + 1, NULL);
 
     p = hport->raw_config_desc;
     while (desc_len < hport->config.config_desc.wTotalLength) {
@@ -152,13 +151,14 @@ static int usbh_cdc_ncm_connect(struct usbh_hubport *hport, uint8_t intf)
 get_mac:
     if (mac_str_idx == 0xff) {
         USB_LOG_ERR("Do not find cdc ncm mac string\r\n");
-        return -1;
+        ret = -1;
+        goto errout;
     }
 
     memset(mac_buffer, 0, 12);
     ret = usbh_get_string_desc(cdc_ncm_class->hport, mac_str_idx, (uint8_t *)mac_buffer, 12);
     if (ret < 0) {
-        return ret;
+        goto errout;
     }
 
     for (int i = 0, j = 0; i < 12; i += 2, j++) {
@@ -225,36 +225,36 @@ get_mac:
 
     usbh_cdc_ncm_run(cdc_ncm_class);
     return ret;
+errout:
+    usbh_set_intf_data(hport, intf, NULL);
+    memset(cdc_ncm_class, 0, sizeof(struct usbh_cdc_ncm));
+    return ret;
 }
 
 static int usbh_cdc_ncm_disconnect(struct usbh_hubport *hport, uint8_t intf)
 {
     int ret = 0;
 
-    struct usbh_cdc_ncm *cdc_ncm_class = (struct usbh_cdc_ncm *)hport->config.intf[intf].priv;
+    struct usbh_cdc_ncm *cdc_ncm_class = (struct usbh_cdc_ncm *)usbh_get_intf_data(hport, intf);
 
-    if (cdc_ncm_class) {
-        if (cdc_ncm_class->bulkin) {
-            usbh_kill_urb(&cdc_ncm_class->bulkin_urb);
-        }
-
-        if (cdc_ncm_class->bulkout) {
-            usbh_kill_urb(&cdc_ncm_class->bulkout_urb);
-        }
-
-        if (cdc_ncm_class->intin) {
-            usbh_kill_urb(&cdc_ncm_class->intin_urb);
-        }
-
-        if (hport->config.intf[intf].devname[0] != '\0') {
-            usb_osal_thread_schedule_other();
-            USB_LOG_INFO("Unregister CDC NCM Class:%s\r\n", hport->config.intf[intf].devname);
-            usbh_cdc_ncm_stop(cdc_ncm_class);
-        }
-
-        memset(cdc_ncm_class, 0, sizeof(struct usbh_cdc_ncm));
+    if (cdc_ncm_class->bulkin) {
+        usbh_kill_urb(&cdc_ncm_class->bulkin_urb);
     }
 
+    if (cdc_ncm_class->bulkout) {
+        usbh_kill_urb(&cdc_ncm_class->bulkout_urb);
+    }
+
+    if (cdc_ncm_class->intin) {
+        usbh_kill_urb(&cdc_ncm_class->intin_urb);
+    }
+
+    usb_osal_thread_schedule_other();
+    USB_LOG_INFO("Unregister CDC NCM Class:%s\r\n", hport->config.intf[intf].devname);
+    usbh_cdc_ncm_stop(cdc_ncm_class);
+
+    usbh_set_intf_data(hport, intf, NULL);
+    memset(cdc_ncm_class, 0, sizeof(struct usbh_cdc_ncm));
     return ret;
 }
 

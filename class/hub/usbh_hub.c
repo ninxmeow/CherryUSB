@@ -58,19 +58,18 @@ static void usbh_hub_class_free(struct usbh_hub *hub_class)
 
 static int _usbh_hub_get_hub_descriptor(struct usbh_hub *hub, uint8_t *buffer)
 {
-    struct usb_setup_packet *setup;
+    struct usb_setup_packet setup;
     int ret;
 
-    setup = hub->parent->setup;
 
-    setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_DEVICE;
-    setup->bRequest = USB_REQUEST_GET_DESCRIPTOR;
-    setup->wValue = HUB_DESCRIPTOR_TYPE_HUB << 8;
+    setup.bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_DEVICE;
+    setup.bRequest = USB_REQUEST_GET_DESCRIPTOR;
+    setup.wValue = HUB_DESCRIPTOR_TYPE_HUB << 8;
 
-    setup->wIndex = 0;
-    setup->wLength = USB_SIZEOF_HUB_DESC;
+    setup.wIndex = 0;
+    setup.wLength = USB_SIZEOF_HUB_DESC;
 
-    ret = usbh_control_transfer(hub->parent, setup, g_hub_buf[hub->bus->busid]);
+    ret = usbh_control_transfer(hub->parent, &setup, g_hub_buf[hub->bus->busid]);
     if (ret != USB_SIZEOF_HUB_DESC) {
         return ret < 0 ? ret : -USB_ERR_IO;
     }
@@ -80,19 +79,18 @@ static int _usbh_hub_get_hub_descriptor(struct usbh_hub *hub, uint8_t *buffer)
 
 static int _usbh_hub_get_hub_ss_descriptor(struct usbh_hub *hub, uint8_t *buffer)
 {
-    struct usb_setup_packet *setup;
+    struct usb_setup_packet setup;
     int ret;
 
-    setup = hub->parent->setup;
 
-    setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_DEVICE;
-    setup->bRequest = USB_REQUEST_GET_DESCRIPTOR;
-    setup->wValue = HUB_DESCRIPTOR_TYPE_HUB3 << 8;
+    setup.bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_DEVICE;
+    setup.bRequest = USB_REQUEST_GET_DESCRIPTOR;
+    setup.wValue = HUB_DESCRIPTOR_TYPE_HUB3 << 8;
 
-    setup->wIndex = 0;
-    setup->wLength = USB_SIZEOF_HUB_SS_DESC;
+    setup.wIndex = 0;
+    setup.wLength = USB_SIZEOF_HUB_SS_DESC;
 
-    ret = usbh_control_transfer(hub->parent, setup, g_hub_buf[hub->bus->busid]);
+    ret = usbh_control_transfer(hub->parent, &setup, g_hub_buf[hub->bus->busid]);
     if (ret != USB_SIZEOF_HUB_SS_DESC) {
         return ret < 0 ? ret : -USB_ERR_IO;
     }
@@ -103,18 +101,17 @@ static int _usbh_hub_get_hub_ss_descriptor(struct usbh_hub *hub, uint8_t *buffer
 
 static int _usbh_hub_get_portstatus(struct usbh_hub *hub, uint8_t port, struct hub_port_status *port_status)
 {
-    struct usb_setup_packet *setup;
+    struct usb_setup_packet setup;
     int ret;
 
-    setup = hub->parent->setup;
 
-    setup->bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_OTHER;
-    setup->bRequest = HUB_REQUEST_GET_STATUS;
-    setup->wValue = 0;
-    setup->wIndex = port;
-    setup->wLength = 4;
+    setup.bmRequestType = USB_REQUEST_DIR_IN | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_OTHER;
+    setup.bRequest = HUB_REQUEST_GET_STATUS;
+    setup.wValue = 0;
+    setup.wIndex = port;
+    setup.wLength = 4;
 
-    ret = usbh_control_transfer(hub->parent, setup, g_hub_buf[hub->bus->busid]);
+    ret = usbh_control_transfer(hub->parent, &setup, g_hub_buf[hub->bus->busid]);
     if (ret != 4) {
         return ret < 0 ? ret : -USB_ERR_IO;
     }
@@ -124,48 +121,45 @@ static int _usbh_hub_get_portstatus(struct usbh_hub *hub, uint8_t port, struct h
 
 static int _usbh_hub_set_feature(struct usbh_hub *hub, uint8_t port, uint8_t feature)
 {
-    struct usb_setup_packet *setup;
+    struct usb_setup_packet setup;
 
-    setup = hub->parent->setup;
 
-    setup->bmRequestType = USB_REQUEST_DIR_OUT | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_OTHER;
-    setup->bRequest = HUB_REQUEST_SET_FEATURE;
-    setup->wValue = feature;
-    setup->wIndex = port;
-    setup->wLength = 0;
+    setup.bmRequestType = USB_REQUEST_DIR_OUT | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_OTHER;
+    setup.bRequest = HUB_REQUEST_SET_FEATURE;
+    setup.wValue = feature;
+    setup.wIndex = port;
+    setup.wLength = 0;
 
-    return usbh_control_transfer(hub->parent, setup, NULL);
+    return usbh_control_transfer(hub->parent, &setup, NULL);
 }
 
 static int _usbh_hub_clear_feature(struct usbh_hub *hub, uint8_t port, uint8_t feature)
 {
-    struct usb_setup_packet *setup;
+    struct usb_setup_packet setup;
 
-    setup = hub->parent->setup;
 
-    setup->bmRequestType = USB_REQUEST_DIR_OUT | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_OTHER;
-    setup->bRequest = HUB_REQUEST_CLEAR_FEATURE;
-    setup->wValue = feature;
-    setup->wIndex = port;
-    setup->wLength = 0;
+    setup.bmRequestType = USB_REQUEST_DIR_OUT | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_OTHER;
+    setup.bRequest = HUB_REQUEST_CLEAR_FEATURE;
+    setup.wValue = feature;
+    setup.wIndex = port;
+    setup.wLength = 0;
 
-    return usbh_control_transfer(hub->parent, setup, NULL);
+    return usbh_control_transfer(hub->parent, &setup, NULL);
 }
 
 #if CONFIG_USBHOST_MAX_EXTHUBS > 0
 static int _usbh_hub_set_depth(struct usbh_hub *hub, uint16_t depth)
 {
-    struct usb_setup_packet *setup;
+    struct usb_setup_packet setup;
 
-    setup = hub->parent->setup;
 
-    setup->bmRequestType = USB_REQUEST_DIR_OUT | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_DEVICE;
-    setup->bRequest = HUB_REQUEST_SET_HUB_DEPTH;
-    setup->wValue = depth;
-    setup->wIndex = 0;
-    setup->wLength = 0;
+    setup.bmRequestType = USB_REQUEST_DIR_OUT | USB_REQUEST_CLASS | USB_REQUEST_RECIPIENT_DEVICE;
+    setup.bRequest = HUB_REQUEST_SET_HUB_DEPTH;
+    setup.wValue = depth;
+    setup.wIndex = 0;
+    setup.wLength = 0;
 
-    return usbh_control_transfer(hub->parent, setup, NULL);
+    return usbh_control_transfer(hub->parent, &setup, NULL);
 }
 
 static int parse_hub_descriptor(struct usb_hub_descriptor *desc, uint16_t length)
@@ -344,11 +338,12 @@ static int usbh_hub_connect(struct usbh_hubport *hport, uint8_t intf)
     hub->speed = hport->speed;
 
     hport->self = hub;
-    hport->config.intf[intf].priv = hub;
+    usbh_set_intf_data(hport, intf, hub);
 
     if (hport->depth > HUB_MAX_DEPTH) {
         USB_LOG_ERR("Hub depth(%d) is overflow\r\n", hport->depth);
-        return -USB_ERR_INVAL;
+        ret = -USB_ERR_INVAL;
+        goto errout;
     }
 
     /*
@@ -361,7 +356,7 @@ static int usbh_hub_connect(struct usbh_hubport *hport, uint8_t intf)
         ret = usbh_hub_set_depth(hub, hport->depth - 1);
         if (ret < 0) {
             USB_LOG_ERR("Unable to set hub depth \r\n");
-            return ret;
+            goto errout;
         }
     }
 
@@ -369,12 +364,12 @@ static int usbh_hub_connect(struct usbh_hubport *hport, uint8_t intf)
     if (hport->speed == USB_SPEED_SUPER) {
         ret = _usbh_hub_get_hub_ss_descriptor(hub, (uint8_t *)&hub->hub_ss_desc);
         if (ret < 0) {
-            return ret;
+            goto errout;
         }
 
         ret = parse_hub_ss_descriptor(&hub->hub_ss_desc, USB_SIZEOF_HUB_SS_DESC);
         if (ret < 0) {
-            return ret;
+            goto errout;
         }
 
         nports = hub->hub_ss_desc.bNbrPorts;
@@ -383,12 +378,12 @@ static int usbh_hub_connect(struct usbh_hubport *hport, uint8_t intf)
     } else {
         ret = _usbh_hub_get_hub_descriptor(hub, (uint8_t *)&hub->hub_desc);
         if (ret < 0) {
-            return ret;
+            goto errout;
         }
 
         ret = parse_hub_descriptor(&hub->hub_desc, USB_SIZEOF_HUB_DESC);
         if (ret < 0) {
-            return ret;
+            goto errout;
         }
         nports = hub->hub_desc.bNbrPorts;
         hub->powerdelay = hub->hub_desc.bPwrOn2PwrGood * 2;
@@ -397,7 +392,8 @@ static int usbh_hub_connect(struct usbh_hubport *hport, uint8_t intf)
 
     if (nports > CONFIG_USBHOST_MAX_EHPORTS) {
         USB_LOG_ERR("Hub nports %u overflow\r\n", nports);
-        return -USB_ERR_NOMEM;
+        ret = -USB_ERR_NOMEM;
+        goto errout;
     }
 
     hub->nports = nports;
@@ -415,19 +411,21 @@ static int usbh_hub_connect(struct usbh_hubport *hport, uint8_t intf)
 
     ep_desc = &hport->config.intf[intf].altsetting[0].ep[0].ep_desc;
     if (USB_GET_ENDPOINT_TYPE(ep_desc->bmAttributes) != USB_ENDPOINT_TYPE_INTERRUPT) {
-        return -USB_ERR_INVAL;
+        ret = -USB_ERR_INVAL;
+        goto errout;
     }
 
     if (ep_desc->bEndpointAddress & 0x80) {
         USBH_EP_INIT(hub->intin, ep_desc);
     } else {
-        return -1;
+        ret = -1;
+        goto errout;
     }
 
     for (uint8_t port = 0; port < hub->nports; port++) {
         ret = usbh_hub_set_feature(hub, port + 1, HUB_PORT_FEATURE_POWER);
         if (ret < 0) {
-            return ret;
+            goto errout;
         }
     }
 
@@ -437,7 +435,7 @@ static int usbh_hub_connect(struct usbh_hubport *hport, uint8_t intf)
         ret = usbh_hub_get_portstatus(hub, port + 1, &port_status);
         USB_LOG_DBG("port %u, status:0x%03x, change:0x%02x\r\n", port + 1, port_status.wPortStatus, port_status.wPortChange);
         if (ret < 0) {
-            return ret;
+            goto errout;
         }
     }
 
@@ -451,10 +449,16 @@ static int usbh_hub_connect(struct usbh_hubport *hport, uint8_t intf)
     hub->int_timer = usb_osal_timer_create("hubint_tim", USBH_GET_URB_INTERVAL(hub->intin->bInterval, hport->speed) / 1000, hub_int_timeout, hub, 0);
     if (hub->int_timer == NULL) {
         USB_LOG_ERR("No memory to alloc int_timer\r\n");
-        return -USB_ERR_NOMEM;
+        ret = -USB_ERR_NOMEM;
+        goto errout;
     }
     usb_osal_timer_start(hub->int_timer);
     return 0;
+errout:
+    usbh_set_intf_data(hport, intf, NULL);
+    hport->self = NULL;
+    usbh_hub_class_free(hub);
+    return ret;
 }
 
 static int usbh_hub_disconnect(struct usbh_hubport *hport, uint8_t intf)
@@ -462,29 +466,26 @@ static int usbh_hub_disconnect(struct usbh_hubport *hport, uint8_t intf)
     struct usbh_hubport *child;
     int ret = 0;
 
-    struct usbh_hub *hub = (struct usbh_hub *)hport->config.intf[intf].priv;
+    struct usbh_hub *hub = (struct usbh_hub *)usbh_get_intf_data(hport, intf);
 
-    if (hub) {
-        if (hub->intin) {
-            usbh_kill_urb(&hub->intin_urb);
-        }
-
-        if (hub->int_timer) {
-            usb_osal_timer_delete(hub->int_timer);
-        }
-
-        for (uint8_t port = 0; port < hub->nports; port++) {
-            child = &hub->child[port];
-            usbh_hubport_release(child);
-            child->parent = NULL;
-        }
-
-        if (hport->config.intf[intf].devname[0] != '\0') {
-            USB_LOG_INFO("Unregister HUB Class:%s\r\n", hport->config.intf[intf].devname);
-        }
-
-        usbh_hub_class_free(hub);
+    if (hub->intin) {
+        usbh_kill_urb(&hub->intin_urb);
     }
+
+    if (hub->int_timer) {
+        usb_osal_timer_delete(hub->int_timer);
+    }
+
+    for (uint8_t port = 0; port < hub->nports; port++) {
+        child = &hub->child[port];
+        usbh_hubport_release(child);
+        child->parent = NULL;
+    }
+
+    USB_LOG_INFO("Unregister HUB Class:%s\r\n", hport->config.intf[intf].devname);
+
+    usbh_set_intf_data(hport, intf, NULL);
+    usbh_hub_class_free(hub);
     return ret;
 }
 #endif
