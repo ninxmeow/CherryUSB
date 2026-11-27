@@ -466,6 +466,7 @@ int usbh_serial_control(struct usbh_serial *serial, int cmd, void *arg)
             usb_ringbuffer_reset(&serial->rx_rb);
             usb_osal_sem_reset(serial->rx_complete_sem);
             serial->rx_buf_index = 0;
+            serial->rx_pending = false;
             ret = usbh_serial_rx_restart(serial);
             return ret;
         } break;
