@@ -864,7 +864,7 @@ int usbh_roothub_control(struct usbh_bus *bus, struct usb_setup_packet *setup, u
 
     nports = CONFIG_USBHOST_MAX_RHPORTS;
     port = setup->wIndex;
-    if (setup->bmRequestType & USB_REQUEST_RECIPIENT_DEVICE) {
+    if ((setup->bmRequestType & USB_REQUEST_RECIPIENT_MASK) == USB_REQUEST_RECIPIENT_DEVICE) {
         switch (setup->bRequest) {
             case HUB_REQUEST_CLEAR_FEATURE:
                 switch (setup->wValue) {
@@ -894,7 +894,7 @@ int usbh_roothub_control(struct usbh_bus *bus, struct usb_setup_packet *setup, u
             default:
                 break;
         }
-    } else if (setup->bmRequestType & USB_REQUEST_RECIPIENT_OTHER) {
+    } else if ((setup->bmRequestType & USB_REQUEST_RECIPIENT_MASK) == USB_REQUEST_RECIPIENT_OTHER) {
         switch (setup->bRequest) {
             case HUB_REQUEST_CLEAR_FEATURE:
                 if (!port || port > nports) {
@@ -1110,9 +1110,15 @@ int usbh_submit_urb(struct usbh_urb *urb)
     return ret;
 errout_timeout:
     flags = usb_osal_enter_critical_section();
-    if (urb->errorcode == -USB_ERR_BUSY) {
-        urb->errorcode = -USB_ERR_TIMEOUT;
+    if (urb->errorcode != -USB_ERR_BUSY) {
+        ret = urb->errorcode;
+        usb_osal_sem_reset(chan->waitsem);
+        dwc2_chan_free(chan);
+        usb_osal_leave_critical_section(flags);
+        USB_LOG_ERR("complete but timeout too small\r\n");
+        return ret;
     }
+    urb->errorcode = -USB_ERR_TIMEOUT;
     ret = urb->errorcode;
     usb_osal_leave_critical_section(flags);
     usbh_kill_urb(urb);
